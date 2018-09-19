@@ -23,71 +23,67 @@
 using namespace std;
 using namespace cv;
 
-int main(int argc, char* argv[]) {
-    MHandle hEngine = nullptr;
-    Mat img;
-    img = imread("../a.jpg");
-    // cout << img.cols << endl;
-    // cout << img.rows << endl;
-    // imshow("test", img);
-    // waitKey(0);
-    MByte *pWorkMem = (MByte *)malloc(WORKBUF_SIZE);
-    if(pWorkMem == nullptr){
-        fprintf(stderr, "fail to malloc workbuf\r\n");
-        exit(0);
-    }    
+int main(int argc, char* argv[])
+{
+	MHandle hEngine = nullptr;
+	MByte *pWorkMem = (MByte *)malloc(WORKBUF_SIZE);
+	Mat img;
+	if (pWorkMem == nullptr) {
+		fprintf(stderr, "fail to malloc workbuf\r\n");
+		exit(0);
+	}
 
-    int ret = AFD_FSDK_InitialFaceEngine(APPID, DETECT_SDKKEY, pWorkMem, WORKBUF_SIZE,
-                                         &hEngine, AFD_FSDK_OPF_0_HIGHER_EXT, 16, MAX_FACE_NUM);
-    if (ret != 0) {
-        fprintf(stderr, "fail to AFD_FSDK_InitialFaceEngine(): 0x%x\r\n", ret);
-        free(pWorkMem);
-        exit(0);
-    }
+	int ret = AFD_FSDK_InitialFaceEngine(APPID, DETECT_SDKKEY, pWorkMem, WORKBUF_SIZE,
+	                                     &hEngine, AFD_FSDK_OPF_0_HIGHER_EXT, 16, MAX_FACE_NUM);
+	if (ret != 0) {
+		fprintf(stderr, "fail to AFD_FSDK_InitialFaceEngine(): 0x%x\r\n", ret);
+		free(pWorkMem);
+		exit(0);
+	}
 
-    const AFD_FSDK_Version*pVersionInfo = AFD_FSDK_GetVersion(hEngine);
-    printf("%d %d %d %d\r\n", pVersionInfo->lCodebase, pVersionInfo->lMajor,
-                                 pVersionInfo->lMinor, pVersionInfo->lBuild);
-    printf("%s\r\n", pVersionInfo->Version);
-    printf("%s\r\n", pVersionInfo->BuildDate);
-    printf("%s\r\n", pVersionInfo->CopyRight);
+	VideoCapture cap;
+	cap.open("rtsp://10.166.129.58:8554/684387");
 
-    ASVLOFFSCREEN inputImg = { 0 };
-    inputImg.u32PixelArrayFormat = ASVL_PAF_RGB24_B8G8R8;
-    inputImg.i32Width = img.cols;
-    inputImg.i32Height = img.rows;
-    inputImg.ppu8Plane[0] = img.data;
-     if (!inputImg.ppu8Plane[0]) {
-        fprintf(stderr, "fail to fu_ReadFile: %s\r\n", strerror(errno));
-		AFD_FSDK_UninitialFaceEngine(hEngine);
-        free(pWorkMem);
-        exit(0);
-    }
+	while (1) {
+		cap >> img;
+		const AFD_FSDK_Version*pVersionInfo = AFD_FSDK_GetVersion(hEngine);
 
-    inputImg.pi32Pitch[0] = inputImg.i32Width*3;
-    LPAFD_FSDK_FACERES faceResult;
-    ret = AFD_FSDK_StillImageFaceDetection(hEngine, &inputImg, &faceResult);
-    if (ret != 0) {
-        fprintf(stderr, "fail to AFD_FSDK_StillImageFaceDetection(): 0x%x\r\n", ret);
-        free(inputImg.ppu8Plane[0]);
-		AFD_FSDK_UninitialFaceEngine(hEngine);
-        free(pWorkMem);
-        exit(0);
-    }
-    for (int i = 0; i < faceResult->nFace; i++) {
-        printf("face %d:(%d,%d,%d,%d)\r\n", i,
-               faceResult->rcFace[i].left, faceResult->rcFace[i].top,
-               faceResult->rcFace[i].right, faceResult->rcFace[i].bottom);
-        rectangle(img, cvPoint(faceResult->rcFace[i].left, faceResult->rcFace[i].top),
-            cvPoint(faceResult->rcFace[i].right, faceResult->rcFace[i].bottom), cvScalar(0, 0, 255), 3, 4, 0);
-    }
-    imshow("test", img);
-    waitKey(0);
+		ASVLOFFSCREEN inputImg = { 0 };
+		inputImg.u32PixelArrayFormat = ASVL_PAF_RGB24_B8G8R8;
+		inputImg.i32Width = img.cols;
+		inputImg.i32Height = img.rows;
+		inputImg.ppu8Plane[0] = img.data;
+		if (!inputImg.ppu8Plane[0]) {
+			fprintf(stderr, "fail to fu_ReadFile: %s\r\n", strerror(errno));
+			AFD_FSDK_UninitialFaceEngine(hEngine);
+			free(pWorkMem);
+			exit(0);
+		}
 
+		inputImg.pi32Pitch[0] = inputImg.i32Width * 3;
+		LPAFD_FSDK_FACERES faceResult;
+		ret = AFD_FSDK_StillImageFaceDetection(hEngine, &inputImg, &faceResult);
+		if (ret != 0) {
+			fprintf(stderr, "fail to AFD_FSDK_StillImageFaceDetection(): 0x%x\r\n", ret);
+			free(inputImg.ppu8Plane[0]);
+			AFD_FSDK_UninitialFaceEngine(hEngine);
+			free(pWorkMem);
+			exit(0);
+		}
+		for (int i = 0; i < faceResult->nFace; i++) {
+			printf("face %d:(%d,%d,%d,%d)\r\n", i,
+			       faceResult->rcFace[i].left, faceResult->rcFace[i].top,
+			       faceResult->rcFace[i].right, faceResult->rcFace[i].bottom);
+			rectangle(img, cvPoint(faceResult->rcFace[i].left, faceResult->rcFace[i].top),
+			          cvPoint(faceResult->rcFace[i].right, faceResult->rcFace[i].bottom), cvScalar(0, 0, 255), 3, 4, 0);
+		}
+		imshow("test", img);
+		waitKey(1);
+	}
 
-    // free(inputImg.ppu8Plane[0]);
+	// free(inputImg.ppu8Plane[0]);
 	AFD_FSDK_UninitialFaceEngine(hEngine);
-    free(pWorkMem);
+	free(pWorkMem);
 
-    return 0;
+	return 0;
 }
