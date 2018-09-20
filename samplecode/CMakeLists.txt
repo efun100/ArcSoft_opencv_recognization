@@ -9,4 +9,4 @@ link_directories(../../lib/linux_x64)
 add_executable(FaceRecognize
                arcsoft_afd_samplecode.cpp)
 target_link_libraries(FaceRecognize ${OpenCV_LIBS})
-target_link_libraries(FaceRecognize -larcsoft_fsdk_face_detection)
+target_link_libraries(FaceRecognize -larcsoft_fsdk_face_detection -larcsoft_fsdk_face_recognition)
