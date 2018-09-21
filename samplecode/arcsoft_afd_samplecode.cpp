@@ -4,6 +4,12 @@
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
+#include <sys/types.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+
 #include <opencv2/opencv.hpp>
 
 #include "arcsoft_fsdk_face_detection.h"
@@ -20,23 +26,27 @@
 using namespace std;
 using namespace cv;
 
-AFR_FSDK_FACEMODEL faceModels1 = { 0 };
 MHandle hRecognizeEngine = nullptr;
 MHandle hDetectEngine = nullptr;
 
-int init_models()
+struct modelInfo {
+	char name[100];
+	vector<AFR_FSDK_FACEMODEL> faceModels;
+};
+
+AFR_FSDK_FACEMODEL getAFR_FSDK_FACEMODELFromMat(Mat img)
 {
-	Mat model;
+	AFR_FSDK_FACEMODEL faceModel = { 0 };
 	ASVLOFFSCREEN modelImg = { 0 };
-	model = imread("model.jpg");
+
 	// model = imread("liuyifei.jpg");
-	cout << model.cols << endl;
-	cout << model.rows << endl;
+	cout << img.cols << endl;
+	cout << img.rows << endl;
 
 	modelImg.u32PixelArrayFormat = ASVL_PAF_RGB24_B8G8R8;
-	modelImg.i32Width = model.cols;
-	modelImg.i32Height = model.rows;
-	modelImg.ppu8Plane[0] = model.data;
+	modelImg.i32Width = img.cols;
+	modelImg.i32Height = img.rows;
+	modelImg.ppu8Plane[0] = img.data;
 	if (!modelImg.ppu8Plane[0]) {
 		fprintf(stderr, "fail to fu_ReadFile: %s\r\n", strerror(errno));
 		exit(0);
@@ -44,21 +54,97 @@ int init_models()
 
 	modelImg.pi32Pitch[0] = modelImg.i32Width * 3;
 
+	LPAFD_FSDK_FACERES faceResults;
+	int ret = AFD_FSDK_StillImageFaceDetection(hDetectEngine, &modelImg, &faceResults);
+	if (ret != 0) {
+		fprintf(stderr, "fail to AFD_FSDK_StillImageFaceDetection(): 0x%x\r\n", ret);
+		exit(0);
+	}
+
+	if (faceResults->nFace != 1) {
+		cout << "faceResult != 1" << endl;
+		exit(0);
+	}
+
 	AFR_FSDK_FACEINPUT faceResult;
 	faceResult.lOrient = AFR_FSDK_FOC_0;
-	faceResult.rcFace.left = 74;
-	faceResult.rcFace.top = 196;
-	faceResult.rcFace.right = 370;
-	faceResult.rcFace.bottom = 492;
+	faceResult.rcFace.left = faceResults->rcFace[0].left;
+	faceResult.rcFace.top = faceResults->rcFace[0].top;
+	faceResult.rcFace.right = faceResults->rcFace[0].right;
+	faceResult.rcFace.bottom = faceResults->rcFace[0].bottom;
 	AFR_FSDK_FACEMODEL LocalFaceModels = { 0 };
-	int ret = AFR_FSDK_ExtractFRFeature(hRecognizeEngine, &modelImg, &faceResult, &LocalFaceModels);
+	ret = AFR_FSDK_ExtractFRFeature(hRecognizeEngine, &modelImg, &faceResult, &LocalFaceModels);
 	if (ret != 0) {
 		fprintf(stderr, "fail to AFR_FSDK_ExtractFRFeature in Image A\r\n");
 		exit(0);
 	}
-	faceModels1.lFeatureSize = LocalFaceModels.lFeatureSize;
-	faceModels1.pbFeature = (MByte*)malloc(faceModels1.lFeatureSize);
-	memcpy(faceModels1.pbFeature, LocalFaceModels.pbFeature, faceModels1.lFeatureSize);
+	faceModel.lFeatureSize = LocalFaceModels.lFeatureSize;
+	faceModel.pbFeature = (MByte*)malloc(faceModel.lFeatureSize);
+	memcpy(faceModel.pbFeature, LocalFaceModels.pbFeature, faceModel.lFeatureSize);
+	return faceModel;
+}
+
+vector<modelInfo> modelInfos;
+
+void init_models()
+{
+	// Mat model;
+	// model = imread("model.jpg");
+	// faceModels1 = getAFR_FSDK_FACEMODELFromMat(model);
+
+	DIR *dfd;
+	char *pathname = "../models";
+	char name[MAX_PATH];
+	struct dirent *dp;
+	if ((dfd = opendir(pathname)) == NULL) {
+		printf("dir_order: can't open %s\n %s", pathname, strerror(errno));
+		return;
+	}
+
+	while ((dp = readdir(dfd)) != NULL) {
+		if (strncmp(dp->d_name, ".", 1) == 0)
+			continue; /* 跳过当前文件夹和上一层文件夹以及隐藏文件*/
+
+		if (strlen(pathname) + strlen(dp->d_name) + 2 > sizeof(name)) {
+			printf("dir_order: name %s %s too long\n", pathname, dp->d_name);
+		} else {
+			struct stat s_buf;
+			memset(name, 0, sizeof(name));
+			sprintf(name, "%s/%s", pathname, dp->d_name);
+			cout << name << endl;
+			stat(name, &s_buf);
+			if (S_ISDIR(s_buf.st_mode)) {
+				DIR *subDfd = opendir(name);
+				struct dirent *subdp;
+				struct modelInfo m;
+				strcpy(m.name, dp->d_name);
+				while ((subdp = readdir(subDfd)) != NULL) {
+					cout << subdp->d_name << endl;
+					if (strncmp(subdp->d_name, ".", 1) == 0)
+						continue; /* 跳过当前文件夹和上一层文件夹以及隐藏文件*/
+					if (!strstr(subdp->d_name, ".jpg"))
+						continue;
+
+					char imgname[MAX_PATH];
+					memset(imgname, 0 , sizeof(imgname));
+					if (strlen(name) + strlen(subdp->d_name) + 2 > sizeof(imgname)) {
+						printf("%s: name %s %s too long\n", __func__, name, dp->d_name);
+					} else {
+						sprintf(imgname, "%s/%s", name, subdp->d_name);
+						cout << imgname << endl;
+						Mat img = imread(imgname);
+						if (!img.data) {
+							continue;
+						}
+						m.faceModels.push_back(getAFR_FSDK_FACEMODELFromMat(img));
+					}
+				}
+				modelInfos.push_back(m);
+				closedir(subDfd);
+			}
+		}
+	}
+	closedir(dfd);
 }
 
 int main(int argc, char* argv[])
@@ -92,13 +178,16 @@ int main(int argc, char* argv[])
 	}
 
 	init_models();
+
+	cout << __LINE__ << endl;
+	for (auto it = modelInfos.begin(); it != modelInfos.end(); ++it)
+		cout << it->name << endl;
+
 	VideoCapture cap;
-	cap.open("rtsp://10.166.129.58:8554/684387");
+	cap.open("rtsp://10.230.7.94:8554/684387");
 
 	while (1) {
 		cap >> img;
-		// img = imread("liuyifei.jpg");
-		const AFD_FSDK_Version*pVersionInfo = AFD_FSDK_GetVersion(hDetectEngine);
 
 		ASVLOFFSCREEN inputImg = { 0 };
 		inputImg.u32PixelArrayFormat = ASVL_PAF_RGB24_B8G8R8;
@@ -166,15 +255,22 @@ int main(int argc, char* argv[])
 			memcpy(faceModels2.pbFeature, LocalFaceModels.pbFeature, faceModels2.lFeatureSize);
 
 			MFloat fSimilScore = 0.0f;
-			ret = AFR_FSDK_FacePairMatching(hRecognizeEngine, &faceModels1, &faceModels2, &fSimilScore);
-			printf("fSimilScore ==  %f\r\n", fSimilScore);
+			int similarIndex = 0;
+			float similarScore = 0.0;
+			for (int j = 0; j < modelInfos.size(); j++) {
+				for (int k = 0; k < modelInfos[j].faceModels.size(); k++) {
+					ret = AFR_FSDK_FacePairMatching(hRecognizeEngine, &modelInfos[j].faceModels[k], &faceModels2, &fSimilScore);
+					if (fSimilScore > 0.7 && fSimilScore > similarScore) {
+						similarScore = fSimilScore;
+						similarIndex = j;
+					}
+				}
+			}
+			printf("fSimilScore == %f\r\n", fSimilScore);
 			char text[100] = {0};
-			if (fSimilScore > 0.75) {
-				sprintf(text, "zhuqighua %f", fSimilScore);
+			if (similarScore > 0.75) {
+				sprintf(text, "%s %f", modelInfos[similarIndex].name, similarScore);
 				putText(img, text, Point(faceResults->rcFace[i].left, faceResults->rcFace[i].top),
-				        FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 2);
-			} else {
-				putText(img, "unknown", Point(faceResults->rcFace[i].left, faceResults->rcFace[i].top),
 				        FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 2);
 			}
 			rectangle(img, cvPoint(faceResults->rcFace[i].left, faceResults->rcFace[i].top),
